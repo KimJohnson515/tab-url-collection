@@ -3,12 +3,14 @@
   "use strict";
 
   const $ = (id) => document.getElementById(id);
-  const DEFAULT_PREFS = { scope: "all", groupDomain: true, includeInternal: false, email: "" };
+  const DEFAULT_PREFS = { scope: "all", groupDomain: true, includeInternal: false, email: "", toGithub: false, toNotion: false };
   const DEFAULT_GH = { repo: "", token: "", folder: "tabs", branch: "" };
+  const DEFAULT_NOTION = { token: "", page: "" };
 
   const state = {
     prefs: { ...DEFAULT_PREFS },
     gh: { ...DEFAULT_GH },
+    notion: { ...DEFAULT_NOTION },
     items: [],
     deselected: new Set(), // 사용자가 체크 해제한 탭 id
   };
@@ -28,12 +30,17 @@
     return node;
   }
 
-  function toast(message, isError) {
+  // links: [{ label, url }] — https 주소만 '열기' 링크로 붙인다
+  function toast(message, isError, links) {
     const box = $("toast");
     box.textContent = message;
     box.className = "toast" + (isError ? " error" : "");
+    const safe = (links || []).filter((l) => l && /^https:\/\//i.test(l.url));
+    for (const l of safe) {
+      box.append(el("a", { href: l.url, target: "_blank", rel: "noopener noreferrer" }, l.label));
+    }
     clearTimeout(toastTimer);
-    toastTimer = setTimeout(() => { box.textContent = ""; }, 6000);
+    toastTimer = setTimeout(() => { box.textContent = ""; }, safe.length ? 20000 : 6000);
   }
 
   async function copy(text) {
@@ -70,9 +77,14 @@
   /* ───────── 설정 ───────── */
 
   async function loadPrefs() {
-    const { prefs, github } = await chrome.storage.local.get({ prefs: DEFAULT_PREFS, github: DEFAULT_GH });
+    const { prefs, github, notion } = await chrome.storage.local.get({ prefs: DEFAULT_PREFS, github: DEFAULT_GH, notion: DEFAULT_NOTION });
     state.prefs = { ...DEFAULT_PREFS, ...prefs };
     state.gh = { ...DEFAULT_GH, ...github };
+    state.notion = { ...DEFAULT_NOTION, ...notion };
+    $("toGithub").checked = !!state.prefs.toGithub;
+    $("toNotion").checked = !!state.prefs.toNotion;
+    $("ntToken").value = state.notion.token;
+    $("ntPage").value = state.notion.page;
     $("ghRepo").value = state.gh.repo;
     $("ghToken").value = state.gh.token;
     $("ghFolder").value = state.gh.folder;
@@ -266,7 +278,7 @@
     );
   });
 
-  /* ── GitHub: 체크한 탭을 Markdown 파일 하나로 커밋 ── */
+  /* ── 전송: 체크한 탭을 GitHub·노션으로 한 번에 보내기 ── */
 
   for (const [id, key] of [["ghRepo", "repo"], ["ghToken", "token"], ["ghFolder", "folder"], ["ghBranch", "branch"]]) {
     $(id).addEventListener("input", (e) => {
@@ -274,31 +286,75 @@
       chrome.storage.local.set({ github: state.gh });
     });
   }
+  for (const [id, key] of [["ntToken", "token"], ["ntPage", "page"]]) {
+    $(id).addEventListener("input", (e) => {
+      state.notion[key] = e.target.value.trim();
+      chrome.storage.local.set({ notion: state.notion });
+    });
+  }
+  for (const key of ["toGithub", "toNotion"]) {
+    $(key).addEventListener("change", (e) => {
+      state.prefs[key] = e.target.checked;
+      savePrefs();
+    });
+  }
 
-  onClick("github", async () => {
-    const sel = getSelection(); if (!sel) return;
+  const needSettings = (msg) => Object.assign(new Error(msg), { needSettings: true });
+
+  async function sendToGithub(sel, o) {
     const cfg = state.gh;
-    if (!cfg.repo || !cfg.token) {
-      $("ghSettings").open = true;
-      return toast("먼저 'GitHub 설정'에 저장소와 토큰을 입력하세요.", true);
-    }
-    const o = docOpts();
+    if (!cfg.repo || !cfg.token) throw needSettings("전송 설정에 저장소와 토큰을 입력하세요.");
     const path = TabLib.githubPath(cfg.folder, o.now);
-    if (path === null) return toast("폴더 이름에 '..' 은 사용할 수 없습니다.", true);
-
-    toast("GitHub에 연결하는 중…");
+    if (path === null) throw new Error("폴더 이름에 '..' 은 사용할 수 없습니다.");
     const info = await TabLib.githubRepoInfo(cfg); // 토큰·저장소 확인 + 공개 여부 파악
     if (!info.isPrivate) {
       const ok = window.confirm(`'${info.fullName}' 은(는) 공개 저장소입니다.\n올린 탭 주소가 누구에게나 보입니다. 그래도 올릴까요?`);
-      if (!ok) return toast("취소했습니다.");
+      if (!ok) return { message: "GitHub: 공개 저장소라서 보내지 않았습니다." };
     }
-    const result = await TabLib.githubSaveFile(
+    const r = await TabLib.githubSaveFile(
       cfg,
       path,
       TabLib.toMarkdown(sel, o),
       `탭 정리 ${TabLib.formatDateTime(o.now)} · ${sel.length}개`
     );
-    toast(`${info.fullName} 에 ${sel.length}개 탭을 저장했습니다: ${result.path}`);
+    return { message: `GitHub: ${info.fullName} 에 ${sel.length}개 탭을 저장했습니다 (${r.path})`, link: r.url };
+  }
+
+  async function sendToNotion(sel, o) {
+    const cfg = state.notion;
+    if (!cfg.page || !cfg.token) throw needSettings("전송 설정에 토큰과 페이지 주소를 입력하세요.");
+    const title = `탭 정리 ${TabLib.formatDateTime(o.now)} · ${sel.length}개`;
+    const r = await TabLib.notionCreatePage(cfg, title, TabLib.buildNotionBlocks(sel, o));
+    return { message: `노션: '${title}' 페이지를 만들었습니다.`, link: r.url };
+  }
+
+  onClick("send", async () => {
+    const sel = getSelection(); if (!sel) return;
+    const jobs = [];
+    if ($("toGithub").checked) jobs.push({ name: "GitHub", run: sendToGithub });
+    if ($("toNotion").checked) jobs.push({ name: "노션", run: sendToNotion });
+    if (!jobs.length) return toast("보낼 곳(GitHub·노션)을 하나 이상 체크하세요.", true);
+
+    const o = docOpts();
+    toast("보내는 중…");
+    const lines = [];
+    const links = [];
+    let failed = 0;
+    let openSettings = false;
+    for (const job of jobs) { // 한쪽이 실패해도 다른 쪽은 계속 진행한다
+      try {
+        const r = await job.run(sel, o);
+        lines.push(r.message);
+        if (r.link) links.push({ label: `${job.name} 열기`, url: r.link });
+      } catch (e) {
+        failed++;
+        if (e.needSettings) openSettings = true;
+        lines.push(`${job.name}: ${e.message}`);
+        if (e.url) links.push({ label: `${job.name} 열기`, url: e.url });
+      }
+    }
+    if (openSettings) $("sendSettings").open = true;
+    toast(lines.join(" / "), failed > 0, links);
   });
 
   async function sendEmail(target) {

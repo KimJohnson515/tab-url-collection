@@ -543,12 +543,13 @@ tr.domain td{background:#f3f4f6;font-weight:600;font-size:13px}
     }
   }
 
-  async function ghRequest(fetchFn, url, init) {
+  // svc: { name, message(status, apiMessage) } — GitHub·노션 공용 요청 함수
+  async function apiRequest(fetchFn, url, init, svc) {
     let res;
     try {
       res = await fetchFn(url, init);
     } catch (e) {
-      throw new Error("GitHub에 연결하지 못했습니다. 인터넷 연결을 확인하세요.");
+      throw new Error(`${svc.name}에 연결하지 못했습니다. 인터넷 연결을 확인하세요.`);
     }
     let data = null;
     try {
@@ -557,12 +558,14 @@ tr.domain td{background:#f3f4f6;font-weight:600;font-size:13px}
       /* 본문 없음 */
     }
     if (!res.ok) {
-      const err = new Error(ghErrorMessage(res.status, data && data.message));
+      const err = new Error(svc.message(res.status, data && data.message));
       err.status = res.status;
       throw err;
     }
     return data;
   }
+
+  const ghRequest = (fetchFn, url, init) => apiRequest(fetchFn, url, init, { name: "GitHub", message: ghErrorMessage });
 
   function ghPrepare(cfg, opts) {
     const r = parseRepo(cfg && cfg.repo);
@@ -593,6 +596,147 @@ tr.domain td{background:#f3f4f6;font-weight:600;font-size:13px}
     return { path, url: data && data.content ? data.content.html_url : null };
   }
 
+  /* ───────── 노션 (Notion API) ───────── */
+
+  const NOTION_API = "https://api.notion.com/v1";
+  const NOTION_VERSION = "2022-06-28";
+  const NOTION_CHUNK = 100;       // 한 번에 보낼 수 있는 블록 수 상한
+  const NOTION_TEXT_MAX = 1900;   // 한 글 조각 2000자 제한보다 여유 있게
+
+  const UUID_RE = /(?<![0-9a-f])[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}(?![0-9a-f])/gi;
+  const HEX32_RE = /(?<![0-9a-f])[0-9a-f]{32}(?![0-9a-f])/gi;
+
+  // 노션 페이지 주소(https://www.notion.so/제목-<32자리>?pvs=4) 또는 ID → 하이픈 있는 UUID. 못 찾으면 null.
+  function parseNotionPageId(input) {
+    const path = String(input || "").trim().split(/[?#]/)[0];
+    const last = (re) => {
+      const all = path.match(re);
+      return all && all.length ? all[all.length - 1] : null;
+    };
+    const uuid = last(UUID_RE);
+    if (uuid) return uuid.toLowerCase();
+    const hex = last(HEX32_RE);
+    if (!hex) return null;
+    const h = hex.toLowerCase();
+    return `${h.slice(0, 8)}-${h.slice(8, 12)}-${h.slice(12, 16)}-${h.slice(16, 20)}-${h.slice(20)}`;
+  }
+
+  const clipText = (s, max) => {
+    const chars = Array.from(String(s));
+    return chars.length > max ? chars.slice(0, max - 1).join("") + "…" : chars.join("");
+  };
+
+  // http(s) 이고 2000자 이하인 주소만 링크로 쓴다 (노션이 그 외는 거부함)
+  function notionLink(url) {
+    try {
+      const u = new URL(url);
+      if ((u.protocol === "http:" || u.protocol === "https:") && u.href.length <= 2000) return u.href;
+    } catch (e) {
+      /* 잘못된 주소 */
+    }
+    return null;
+  }
+
+  function nText(content, opts) {
+    const t = { type: "text", text: { content: clipText(content, NOTION_TEXT_MAX) } };
+    if (opts && opts.url) t.text.link = { url: opts.url };
+    if (opts && opts.gray) t.annotations = { color: "gray" };
+    return t;
+  }
+
+  const nBlock = (type, rich) => ({ object: "block", type, [type]: { rich_text: rich } });
+
+  /**
+   * 우선순위 순서의 노션 블록 목록: 요약 → 단계 제목 → (도메인 제목) → "N. 제목(링크) — 점수·열람·체류…"
+   * items 는 점수 내림차순이어야 하며, N 은 전체 순위이다.
+   */
+  function buildNotionBlocks(items, opts) {
+    const now = (opts && opts.now) || Date.now();
+    const rank = new Map(items.map((it, i) => [it, i + 1]));
+    const blocks = [
+      nBlock("paragraph", [nText(`총 ${items.length}개 탭 — ${summaryCounts(items)}`)]),
+      nBlock("paragraph", [nText(SCORE_NOTE, { gray: true })]),
+    ];
+    for (const sec of groupForDoc(items, opts && opts.groupByDomain)) {
+      blocks.push(nBlock("heading_2", [nText(`${sec.label} (${sec.count})`)]));
+      for (const g of sec.groups) {
+        if (g.domain != null) blocks.push(nBlock("heading_3", [nText(`${g.domain} (${g.items.length})`)]));
+        for (const it of g.items) {
+          blocks.push(
+            nBlock("bulleted_list_item", [
+              nText(`${rank.get(it)}. ${displayTitle(it)}`, { url: notionLink(it.url) }),
+              nText(` — ${Math.round(it.score)}점 · ${describeMeta(it, now)}`, { gray: true }),
+            ])
+          );
+        }
+      }
+    }
+    return blocks;
+  }
+
+  function notionErrorMessage(status, apiMessage) {
+    const detail = apiMessage ? ` (${apiMessage})` : "";
+    switch (status) {
+      case 401:
+        return "노션 토큰이 올바르지 않습니다. 전송 설정에서 통합 토큰을 다시 확인하세요.";
+      case 403:
+        return "노션 통합에 이 페이지에 글을 쓸 권한이 없습니다. 통합의 '콘텐츠 삽입' 권한을 확인하세요." + detail;
+      case 404:
+        return "노션 페이지를 찾을 수 없습니다. 주소가 맞는지, 그 페이지의 연결(Connections)에 통합을 추가했는지 확인하세요.";
+      case 400:
+        return "노션이 요청을 받아들이지 않았습니다." + detail;
+      case 429:
+        return "노션 요청이 너무 많습니다. 잠시 뒤 다시 시도하세요.";
+      default:
+        return `노션 오류 ${status}` + detail;
+    }
+  }
+
+  const notionRequest = (fetchFn, url, init) => apiRequest(fetchFn, url, init, { name: "노션", message: notionErrorMessage });
+
+  /** 지정한 부모 페이지 아래에 새 페이지를 만들고, 블록은 100개씩 나눠 채운다. */
+  async function notionCreatePage(cfg, title, blocks, opts) {
+    const pageId = parseNotionPageId(cfg && cfg.page);
+    if (!pageId) throw new Error("노션 페이지 주소(또는 ID)를 입력하세요.");
+    if (!cfg.token) throw new Error("노션 통합 토큰을 입력하세요.");
+    const fetchFn = (opts && opts.fetch) || root.fetch.bind(root);
+    const headers = {
+      Authorization: `Bearer ${cfg.token}`,
+      "Notion-Version": NOTION_VERSION,
+      "Content-Type": "application/json",
+    };
+
+    const first = blocks.slice(0, NOTION_CHUNK);
+    const page = await notionRequest(fetchFn, `${NOTION_API}/pages`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({
+        parent: { page_id: pageId },
+        properties: { title: { title: [{ type: "text", text: { content: clipText(title, NOTION_TEXT_MAX) } }] } },
+        children: first,
+      }),
+    });
+
+    let done = first.length;
+    try {
+      for (let i = NOTION_CHUNK; i < blocks.length; i += NOTION_CHUNK) {
+        const chunk = blocks.slice(i, i + NOTION_CHUNK);
+        await notionRequest(fetchFn, `${NOTION_API}/blocks/${page.id}/children`, {
+          method: "PATCH",
+          headers,
+          body: JSON.stringify({ children: chunk }),
+        });
+        done += chunk.length;
+      }
+    } catch (e) {
+      const err = new Error(`페이지는 만들어졌지만 ${done}/${blocks.length}개 항목만 저장되었습니다. ${e.message}`);
+      err.status = e.status;
+      err.url = page.url || null;
+      throw err;
+    }
+    return { id: page.id, url: page.url || null };
+  }
+
   /* ───────── 공개 ───────── */
 
   const api = {
@@ -602,6 +746,7 @@ tr.domain td{background:#f3f4f6;font-weight:600;font-size:13px}
     formatDateTime, fileStamp, formatAgo, formatDuration, escapeHtml,
     toMarkdown, toHtml, toPlainText, toCsv, toTsv, fitChunks, buildEmail, buildBookmarkPlan,
     parseRepo, cleanFolder, githubPath, toBase64Utf8, githubRepoInfo, githubSaveFile,
+    parseNotionPageId, buildNotionBlocks, notionCreatePage,
   };
   root.TabLib = api;
   if (typeof module !== "undefined" && module.exports) module.exports = api;

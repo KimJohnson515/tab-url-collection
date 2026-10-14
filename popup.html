@@ -54,18 +54,29 @@
     </div>
 
     <div class="action-row">
-      <span class="label">GitHub</span>
-      <button id="github" type="button" title="체크한 탭을 우선순위 순서의 Markdown 파일로 만들어 설정한 GitHub 저장소에 커밋합니다.">GitHub로 보내기 (Markdown 파일)</button>
+      <span class="label">전송</span>
+      <label class="check"><input type="checkbox" id="toGithub"> GitHub</label>
+      <label class="check"><input type="checkbox" id="toNotion"> 노션</label>
+      <button id="send" type="button" title="체크한 탭을 위에서 고른 곳(GitHub·노션)으로 한 번에 보냅니다.">선택한 탭 보내기</button>
     </div>
-    <details id="ghSettings" class="gh">
-      <summary>GitHub 설정</summary>
-      <div class="gh-grid">
-        <label>저장소 <input id="ghRepo" type="text" placeholder="계정/저장소 (비공개 저장소 권장)" autocomplete="off" spellcheck="false"></label>
-        <label>토큰 <input id="ghToken" type="password" placeholder="Fine-grained 토큰 (Contents: 읽기 및 쓰기)" autocomplete="off"></label>
-        <label>폴더 <input id="ghFolder" type="text" placeholder="tabs" autocomplete="off" spellcheck="false"></label>
-        <label>브랜치 <input id="ghBranch" type="text" placeholder="비워 두면 저장소 기본 브랜치" autocomplete="off" spellcheck="false"></label>
+    <details id="sendSettings" class="gh">
+      <summary>전송 설정 (GitHub·노션)</summary>
+      <div class="settings-body">
+        <div class="sub">GitHub</div>
+        <div class="gh-grid">
+          <label>저장소 <input id="ghRepo" type="text" placeholder="계정/저장소 (비공개 저장소 권장)" autocomplete="off" spellcheck="false"></label>
+          <label>토큰 <input id="ghToken" type="password" placeholder="Fine-grained 토큰 (Contents: 읽기 및 쓰기)" autocomplete="off"></label>
+          <label>폴더 <input id="ghFolder" type="text" placeholder="tabs" autocomplete="off" spellcheck="false"></label>
+          <label>브랜치 <input id="ghBranch" type="text" placeholder="비워 두면 저장소 기본 브랜치" autocomplete="off" spellcheck="false"></label>
+        </div>
+        <p class="hint">토큰은 이 브라우저에만 저장되고 api.github.com 으로만 전송됩니다. 한 저장소에만 권한을 준 토큰을 쓰세요.</p>
+        <div class="sub">노션</div>
+        <div class="gh-grid">
+          <label>토큰 <input id="ntToken" type="password" placeholder="통합 토큰 (ntn_… 또는 secret_…)" autocomplete="off"></label>
+          <label>페이지 <input id="ntPage" type="text" placeholder="탭 목록을 쌓을 노션 페이지 주소" autocomplete="off" spellcheck="false"></label>
+        </div>
+        <p class="hint">그 페이지의 연결(Connections)에 통합을 추가해야 합니다. 토큰은 이 브라우저에만 저장되고 api.notion.com 으로만 전송됩니다.</p>
       </div>
-      <p class="hint">토큰은 이 브라우저에만 저장되고 api.github.com 으로만 전송됩니다. 한 저장소에만 권한을 준 토큰을 쓰세요.</p>
     </details>
 
     <div class="action-row">

@@ -1,11 +1,11 @@
 {
   "manifest_version": 3,
   "name": "탭 정리기 (Tab Organizer)",
-  "version": "1.2.0",
+  "version": "1.3.0",
   "description": "열려 있는 탭을 열람 횟수·체류 시간·최근 접근 기준으로 우선순위를 매겨 한 문서로 정리합니다.",
   "minimum_chrome_version": "121",
   "permissions": ["tabs", "storage", "idle", "alarms", "clipboardWrite", "bookmarks"],
-  "host_permissions": ["https://api.github.com/*"],
+  "host_permissions": ["https://api.github.com/*", "https://api.notion.com/*"],
   "background": {
     "service_worker": "background.js"
   },
