@@ -4,9 +4,11 @@
 
   const $ = (id) => document.getElementById(id);
   const DEFAULT_PREFS = { scope: "all", groupDomain: true, includeInternal: false, email: "" };
+  const DEFAULT_GH = { repo: "", token: "", folder: "tabs", branch: "" };
 
   const state = {
     prefs: { ...DEFAULT_PREFS },
+    gh: { ...DEFAULT_GH },
     items: [],
     deselected: new Set(), // 사용자가 체크 해제한 탭 id
   };
@@ -68,8 +70,13 @@
   /* ───────── 설정 ───────── */
 
   async function loadPrefs() {
-    const { prefs } = await chrome.storage.local.get({ prefs: DEFAULT_PREFS });
+    const { prefs, github } = await chrome.storage.local.get({ prefs: DEFAULT_PREFS, github: DEFAULT_GH });
     state.prefs = { ...DEFAULT_PREFS, ...prefs };
+    state.gh = { ...DEFAULT_GH, ...github };
+    $("ghRepo").value = state.gh.repo;
+    $("ghToken").value = state.gh.token;
+    $("ghFolder").value = state.gh.folder;
+    $("ghBranch").value = state.gh.branch;
     $("scope").value = state.prefs.scope;
     $("groupDomain").checked = state.prefs.groupDomain;
     $("includeInternal").checked = state.prefs.includeInternal;
@@ -257,6 +264,41 @@
         (notes.length ? ` (${notes.join(", ")})` : ""),
       failed > 0 && made === 0
     );
+  });
+
+  /* ── GitHub: 체크한 탭을 Markdown 파일 하나로 커밋 ── */
+
+  for (const [id, key] of [["ghRepo", "repo"], ["ghToken", "token"], ["ghFolder", "folder"], ["ghBranch", "branch"]]) {
+    $(id).addEventListener("input", (e) => {
+      state.gh[key] = e.target.value.trim();
+      chrome.storage.local.set({ github: state.gh });
+    });
+  }
+
+  onClick("github", async () => {
+    const sel = getSelection(); if (!sel) return;
+    const cfg = state.gh;
+    if (!cfg.repo || !cfg.token) {
+      $("ghSettings").open = true;
+      return toast("먼저 'GitHub 설정'에 저장소와 토큰을 입력하세요.", true);
+    }
+    const o = docOpts();
+    const path = TabLib.githubPath(cfg.folder, o.now);
+    if (path === null) return toast("폴더 이름에 '..' 은 사용할 수 없습니다.", true);
+
+    toast("GitHub에 연결하는 중…");
+    const info = await TabLib.githubRepoInfo(cfg); // 토큰·저장소 확인 + 공개 여부 파악
+    if (!info.isPrivate) {
+      const ok = window.confirm(`'${info.fullName}' 은(는) 공개 저장소입니다.\n올린 탭 주소가 누구에게나 보입니다. 그래도 올릴까요?`);
+      if (!ok) return toast("취소했습니다.");
+    }
+    const result = await TabLib.githubSaveFile(
+      cfg,
+      path,
+      TabLib.toMarkdown(sel, o),
+      `탭 정리 ${TabLib.formatDateTime(o.now)} · ${sel.length}개`
+    );
+    toast(`${info.fullName} 에 ${sel.length}개 탭을 저장했습니다: ${result.path}`);
   });
 
   async function sendEmail(target) {

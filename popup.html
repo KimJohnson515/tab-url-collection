@@ -54,6 +54,21 @@
     </div>
 
     <div class="action-row">
+      <span class="label">GitHub</span>
+      <button id="github" type="button" title="체크한 탭을 우선순위 순서의 Markdown 파일로 만들어 설정한 GitHub 저장소에 커밋합니다.">GitHub로 보내기 (Markdown 파일)</button>
+    </div>
+    <details id="ghSettings" class="gh">
+      <summary>GitHub 설정</summary>
+      <div class="gh-grid">
+        <label>저장소 <input id="ghRepo" type="text" placeholder="계정/저장소 (비공개 저장소 권장)" autocomplete="off" spellcheck="false"></label>
+        <label>토큰 <input id="ghToken" type="password" placeholder="Fine-grained 토큰 (Contents: 읽기 및 쓰기)" autocomplete="off"></label>
+        <label>폴더 <input id="ghFolder" type="text" placeholder="tabs" autocomplete="off" spellcheck="false"></label>
+        <label>브랜치 <input id="ghBranch" type="text" placeholder="비워 두면 저장소 기본 브랜치" autocomplete="off" spellcheck="false"></label>
+      </div>
+      <p class="hint">토큰은 이 브라우저에만 저장되고 api.github.com 으로만 전송됩니다. 한 저장소에만 권한을 준 토큰을 쓰세요.</p>
+    </details>
+
+    <div class="action-row">
       <span class="label">메일</span>
       <input id="email" type="text" placeholder="받는 사람 (선택, 쉼표로 구분)" autocomplete="off" spellcheck="false">
       <button id="gmail" type="button">Gmail</button>

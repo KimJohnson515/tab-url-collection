@@ -479,6 +479,120 @@ tr.domain td{background:#f3f4f6;font-weight:600;font-size:13px}
     return { folderName: `탭 정리 ${formatDateTime(now)}`, entries, duplicates, skipped };
   }
 
+  /* ───────── GitHub (Contents API) ───────── */
+
+  const GITHUB_API = "https://api.github.com";
+
+  // "계정/저장소" 또는 "https://github.com/계정/저장소(.git)" 모두 허용
+  function parseRepo(input) {
+    const s = String(input || "")
+      .trim()
+      .replace(/^https?:\/\/github\.com\//i, "")
+      .replace(/\/+$/, "")
+      .replace(/\.git$/i, "");
+    const m = /^([A-Za-z0-9-]{1,39})\/([A-Za-z0-9._-]{1,100})$/.exec(s);
+    if (!m || m[2] === "." || m[2] === "..") return null;
+    return { owner: m[1], repo: m[2] };
+  }
+
+  // 폴더 이름 정리: 앞뒤 슬래시 제거, '..' 가 있으면 null (저장소 밖으로 나가는 경로 차단)
+  function cleanFolder(folder) {
+    const parts = String(folder == null ? "" : folder).split(/[\\/]+/).map((p) => p.trim()).filter(Boolean);
+    if (parts.some((p) => p === "." || p === "..")) return null;
+    return parts.join("/");
+  }
+
+  // 예: tabs/20261015-081000.md  (폴더가 비어 있으면 저장소 최상위)
+  function githubPath(folder, now) {
+    const f = cleanFolder(folder);
+    if (f === null) return null;
+    const d = new Date(now);
+    const name = `${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}-${pad(d.getHours())}${pad(d.getMinutes())}${pad(d.getSeconds())}.md`;
+    return f ? `${f}/${name}` : name;
+  }
+
+  function toBase64Utf8(text) {
+    const bytes = new TextEncoder().encode(text);
+    let bin = "";
+    for (let i = 0; i < bytes.length; i += 0x8000) {
+      bin += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
+    }
+    return btoa(bin);
+  }
+
+  const ghHeaders = (token) => ({
+    Authorization: `Bearer ${token}`,
+    Accept: "application/vnd.github+json",
+    "X-GitHub-Api-Version": "2022-11-28",
+  });
+
+  function ghErrorMessage(status, apiMessage) {
+    const detail = apiMessage ? ` (${apiMessage})` : "";
+    switch (status) {
+      case 401:
+        return "토큰이 올바르지 않거나 만료되었습니다. GitHub 설정에서 토큰을 다시 확인하세요.";
+      case 403:
+        return "권한이 없거나 요청 한도를 넘었습니다. 토큰에 그 저장소의 'Contents: 읽기 및 쓰기' 권한이 있는지 확인하세요." + detail;
+      case 404:
+        return "저장소를 찾을 수 없습니다. 이름이 맞는지, 토큰이 그 저장소에 접근할 수 있는지 확인하세요. (권한이 없는 비공개 저장소도 '없음'으로 표시됩니다)";
+      case 409:
+      case 422:
+        return "저장하지 못했습니다. 브랜치 이름이나 폴더 이름을 확인하세요." + detail;
+      default:
+        return `GitHub 오류 ${status}` + detail;
+    }
+  }
+
+  async function ghRequest(fetchFn, url, init) {
+    let res;
+    try {
+      res = await fetchFn(url, init);
+    } catch (e) {
+      throw new Error("GitHub에 연결하지 못했습니다. 인터넷 연결을 확인하세요.");
+    }
+    let data = null;
+    try {
+      data = await res.json();
+    } catch (e) {
+      /* 본문 없음 */
+    }
+    if (!res.ok) {
+      const err = new Error(ghErrorMessage(res.status, data && data.message));
+      err.status = res.status;
+      throw err;
+    }
+    return data;
+  }
+
+  function ghPrepare(cfg, opts) {
+    const r = parseRepo(cfg && cfg.repo);
+    if (!r) throw new Error("저장소 이름은 '계정/저장소' 형식으로 입력하세요.");
+    if (!cfg.token) throw new Error("GitHub 토큰을 입력하세요.");
+    const fetchFn = (opts && opts.fetch) || root.fetch.bind(root);
+    return { r, fetchFn };
+  }
+
+  // 저장소 조회: 토큰·저장소 이름을 미리 확인하고, 공개 저장소인지 알려 준다.
+  async function githubRepoInfo(cfg, opts) {
+    const { r, fetchFn } = ghPrepare(cfg, opts);
+    const data = await ghRequest(fetchFn, `${GITHUB_API}/repos/${r.owner}/${r.repo}`, { headers: ghHeaders(cfg.token) });
+    return { fullName: data.full_name || `${r.owner}/${r.repo}`, isPrivate: !!data.private, defaultBranch: data.default_branch };
+  }
+
+  // 새 파일 하나를 커밋한다. 같은 경로가 이미 있으면 덮어쓰지 않고 오류(422)가 난다.
+  async function githubSaveFile(cfg, path, text, message, opts) {
+    const { r, fetchFn } = ghPrepare(cfg, opts);
+    const urlPath = String(path).split("/").map(encodeURIComponent).join("/");
+    const body = { message, content: toBase64Utf8(text) };
+    if (cfg.branch) body.branch = cfg.branch;
+    const data = await ghRequest(fetchFn, `${GITHUB_API}/repos/${r.owner}/${r.repo}/contents/${urlPath}`, {
+      method: "PUT",
+      headers: { ...ghHeaders(cfg.token), "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    return { path, url: data && data.content ? data.content.html_url : null };
+  }
+
   /* ───────── 공개 ───────── */
 
   const api = {
@@ -487,6 +601,7 @@ tr.domain td{background:#f3f4f6;font-weight:600;font-size:13px}
     groupForDoc, summaryCounts, describeMeta,
     formatDateTime, fileStamp, formatAgo, formatDuration, escapeHtml,
     toMarkdown, toHtml, toPlainText, toCsv, toTsv, fitChunks, buildEmail, buildBookmarkPlan,
+    parseRepo, cleanFolder, githubPath, toBase64Utf8, githubRepoInfo, githubSaveFile,
   };
   root.TabLib = api;
   if (typeof module !== "undefined" && module.exports) module.exports = api;

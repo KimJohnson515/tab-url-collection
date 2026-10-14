@@ -155,5 +155,12 @@ footer { border-top: 1px solid var(--line); padding: 8px 14px 10px; }
 .action-row .label { width: 52px; color: var(--muted); font-size: 12px; flex: none; }
 .action-row input[type="text"] { flex: 1; min-width: 0; }
 
+.gh { margin-top: 6px; color: var(--muted); font-size: 12px; }
+.gh summary { cursor: pointer; padding-left: 58px; }
+.gh-grid { display: grid; grid-template-columns: 52px 1fr; gap: 4px 6px; align-items: center; margin-top: 6px; }
+.gh-grid label { display: contents; }
+.gh-grid input { min-width: 0; width: 100%; }
+.hint { margin: 6px 0 0 58px; font-size: 11px; }
+
 .toast { min-height: 18px; margin-top: 8px; font-size: 12px; color: var(--accent); }
 .toast.error { color: var(--high); }
