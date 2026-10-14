@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <title>탭 정리기</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <header>
+    <div class="title-row">
+      <h1>탭 정리기</h1>
+      <span id="summary" class="summary"></span>
+      <button id="refresh" type="button" class="ghost" title="목록 새로고침">새로고침</button>
+    </div>
+    <div class="options">
+      <label>범위
+        <select id="scope">
+          <option value="all">모든 창</option>
+          <option value="current">현재 창</option>
+        </select>
+      </label>
+      <label><input type="checkbox" id="groupDomain"> 도메인별 묶기</label>
+      <label><input type="checkbox" id="includeInternal"> 내부 페이지 포함</label>
+    </div>
+  </header>
+
+  <main id="list" aria-live="polite"></main>
+
+  <footer>
+    <div class="selection">
+      <span id="selCount"></span>
+      <span class="spacer"></span>
+      <button id="selAll" type="button" class="ghost">전체 선택</button>
+      <button id="selNone" type="button" class="ghost">선택 해제</button>
+      <button id="resetStats" type="button" class="ghost" title="쌓인 열람 횟수·체류 시간 기록을 모두 지우고 처음부터 다시 기록합니다.">기록 초기화</button>
+    </div>
+
+    <div class="action-row">
+      <span class="label">문서</span>
+      <button id="mdSave" type="button">Markdown 저장</button>
+      <button id="htmlSave" type="button">HTML 저장</button>
+      <button id="mdCopy" type="button">복사</button>
+    </div>
+
+    <div class="action-row">
+      <span class="label">시트</span>
+      <button id="csvSave" type="button">CSV 저장</button>
+      <button id="sheets" type="button" title="표를 복사한 뒤 새 구글 시트를 엽니다. A1 셀에 붙여넣기(Ctrl+V) 하세요.">구글 시트로 복사</button>
+    </div>
+
+    <div class="action-row">
+      <span class="label">즐겨찾기</span>
+      <button id="bookmarks" type="button" title="기타 즐겨찾기에 '탭 정리 날짜' 폴더를 만들고, 우선순위 순서대로 1. 이름, 2. 이름 … 으로 저장합니다.">즐겨찾기 폴더로 저장 (우선순위 번호순)</button>
+    </div>
+
+    <div class="action-row">
+      <span class="label">메일</span>
+      <input id="email" type="text" placeholder="받는 사람 (선택, 쉼표로 구분)" autocomplete="off" spellcheck="false">
+      <button id="gmail" type="button">Gmail</button>
+      <button id="mailto" type="button">메일 앱</button>
+    </div>
+
+    <div id="toast" class="toast" role="status"></div>
+  </footer>
+
+  <script src="lib.js"></script>
+  <script src="popup.js"></script>
+</body>
+</html>
